@@ -2,7 +2,7 @@
 
 Neural-network surrogates for 2D airfoil CFD: predict the pressure and velocity fields around an airfoil in milliseconds instead of running a RANS simulation. The models are trained and evaluated on the AirfRANS dataset of 1,000 high-fidelity simulations.
 
-> **Status: design phase.** This repo currently contains the project brief only. No application code exists yet. Features move through `pending → spec_ready → approval → in_progress → done`.
+> **Status: in development.** The container stack is in place; the data pipeline comes next.
 
 ## Planned pipeline
 
@@ -25,6 +25,20 @@ Evaluation on 200 unseen airfoils
    ▼
 Plots + .vtu exports (true / predicted / error) for ParaView
 ```
+
+## Running it
+
+Everything runs in Docker, so no local Python or CUDA installation is needed. You need Docker Desktop (WSL2 backend on Windows) and an NVIDIA GPU with a current driver. The PyTorch wheels inside the image bring their own CUDA runtime.
+
+```bash
+cd servicios
+cp .env.example .env    # replace CHANGE_ME with a generated token
+docker compose --profile ml build
+docker compose --profile ml run --rm ml       # test suite, on the GPU
+docker compose --profile dev up -d            # JupyterLab at http://localhost:8889
+```
+
+`ml` is a job runner, not a server: every pipeline stage runs as `docker compose --profile ml run --rm ml python -m <module>`. Data is written to `data/` through a bind mount and is never part of an image.
 
 ## Data
 

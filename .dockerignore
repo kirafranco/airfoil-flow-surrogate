@@ -1,0 +1,42 @@
+# Build context exclusions for every image in this repository. The context is
+# the project root, because the images carry src/ and the requirements files.
+#
+# None of this is a nicety: data/ will hold ~25 GB of CFD snapshots, and .env
+# holds the stack's secrets. Neither belongs in an image layer.
+
+# Data, model artefacts and exports. Never versioned, never built in.
+data/
+*.parquet
+*.vtu
+*.vtp
+*.pt
+*.ckpt
+*.csv
+
+# Secrets. .env.example is versioned and carries placeholders only.
+**/.env
+!**/.env.example
+
+# Local working state that no image needs.
+graphify-out/
+docs/
+notebooks/
+tests/
+.venv/
+.conda/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Version control and editor state.
+.git/
+.gitignore
+.gitattributes
+.github/
+.vscode/
+.idea/
+
+# Logs.
+*.log
+logs/

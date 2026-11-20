@@ -1,0 +1,100 @@
+# airfoil-flow-surrogate — container stack.
+#
+# Profiles are mandatory; nothing starts without one.
+#
+#   ml    the GPU job runner: ingestion, ETL, training, evaluation, tests
+#   dev   JupyterLab, for exploration only
+#
+#   docker compose --profile ml run --rm ml                      # test suite
+#   docker compose --profile ml run --rm ml python -m <module>   # a pipeline stage
+#   docker compose --profile dev up -d                           # JupyterLab, http://localhost:8889
+#   docker compose --profile dev down
+#
+# Configuration is injected from .env, which is gitignored; .env.example carries
+# the same keys with placeholders and is versioned. Data lives in bind mounts
+# under ../data/, never in named volumes, so copying the project folder to
+# another machine carries the data with it.
+
+networks:
+  airfoil-net:
+    name: ${COMPOSE_PROJECT_NAME}-net
+    driver: bridge
+
+services:
+  ml:
+    build:
+      context: ..
+      dockerfile: servicios/ml/Dockerfile
+    # Tagged with the torch version: `docker images` says what it runs.
+    image: ${COMPOSE_PROJECT_NAME}-ml:2.15.0
+    profiles: [ml]
+    # Unlike a long-running service, this is never restarted: it is a
+    # run-to-completion job. `unless-stopped` or `always` would re-run
+    # a finished download or training run whenever Docker Desktop starts. Quoted,
+    # because a bare `no` is parsed as the boolean false.
+    restart: "no"
+    environment:
+      TZ: UTC
+    volumes:
+      # Code, tests and configuration read-only: a pipeline stage has no
+      # business rewriting the code that defines it.
+      - ../:/opt/project:ro
+      # data/ writable over the top: raw snapshots, interim and processed
+      # layers, models and exports are what this container produces.
+      - ../data:/opt/project/data
+    # PyTorch DataLoader workers hand batches over through /dev/shm, and
+    # Docker's 64 MB default fails them as soon as num_workers > 0.
+    shm_size: 1gb
+    networks: [airfoil-net]
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: "2"
+        reservations:
+          # The laptop's RTX 3060, passed through Docker Desktop's WSL2 backend.
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  jupyter:
+    build:
+      context: ..
+      dockerfile: servicios/jupyter/Dockerfile
+    # Tagged with the JupyterLab version.
+    image: ${COMPOSE_PROJECT_NAME}-jupyter:4.6.6
+    container_name: ${COMPOSE_PROJECT_NAME}-jupyter
+    profiles: [dev]
+    restart: unless-stopped
+    # No GPU reservation, deliberately: VRAM belongs to training, and a notebook
+    # holding 1-2 GB of it would starve a run on a 6 GB card.
+    environment:
+      JUPYTER_TOKEN: ${JUPYTER_TOKEN}
+      TZ: UTC
+    ports:
+      # Loopback by default (.env): a notebook server executes arbitrary code,
+      # so it answers this machine only. 8889, not 8888, so it can run beside
+      # another project's JupyterLab.
+      - "${JUPYTER_BIND_ADDRESS}:${JUPYTER_PORT}:8888"
+    volumes:
+      - ../:/opt/project:ro
+      - ../data:/opt/project/data
+      # notebooks/ is the one versioned path a service may write, because
+      # writing notebooks is what this service is for.
+      - ../notebooks:/opt/project/notebooks
+      - ../data/jupyter:/home/jupyter/.jupyter
+    healthcheck:
+      # python rather than curl: the slim base has no curl. /api answers without
+      # a token, so this probes the server, not the login.
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8888/api', timeout=5)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks: [airfoil-net]
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: "2"
