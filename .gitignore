@@ -1,0 +1,28 @@
+# Data, caches, model artifacts and exports: never versioned.
+# AirfRANS is ODbL and is downloaded by the pipeline, never committed.
+data/
+*.parquet
+*.vtu
+*.vtp
+*.pt
+*.ckpt
+
+# Secrets: .env.example IS versioned
+.env
+**/.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.conda/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Logs
+*.log
+logs/
+
+# OS / editor noise
+Thumbs.db
+.DS_Store
