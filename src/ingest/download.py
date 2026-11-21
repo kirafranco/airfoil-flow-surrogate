@@ -62,7 +62,13 @@ class DownloadResult:
     path: Path
     size_bytes: int
     sha256: str
+    #: Whole call, including a re-hash from disk if one was needed.
     seconds: float
+    #: Bytes this call fetched over the network. Less than `size_bytes` when an
+    #: earlier run left a `.part`; more when a server ignored Range.
+    transferred_bytes: int
+    #: Time spent fetching, without the re-hash.
+    transfer_seconds: float
     #: Byte offset at which each resumed request started.
     resumed_from: tuple[int, ...]
     #: Times the server ignored a Range request, forcing a restart from zero.
@@ -70,7 +76,10 @@ class DownloadResult:
 
     @property
     def mib_per_s(self) -> float:
-        return self.size_bytes / _MIB / self.seconds if self.seconds > 0 else 0.0
+        """Network throughput of this call: what it fetched over the time it spent fetching."""
+        if self.transfer_seconds <= 0:
+            return 0.0
+        return self.transferred_bytes / _MIB / self.transfer_seconds
 
 
 @dataclass
@@ -82,6 +91,8 @@ class _Transfer:
     #: False once bytes on disk were written by another process (or skipped by
     #: the hasher), so the streamed hash no longer covers the whole file.
     hash_covers_file: bool = True
+    #: Every byte received over the network, across attempts and restarts.
+    transferred_bytes: int = 0
     resumed_from: list[int] = field(default_factory=list)
     restarts: int = 0
     next_progress_pct: int = PROGRESS_STEP_PCT
@@ -228,6 +239,7 @@ def download(
                     fh.write(chunk)
                     state.hasher.update(chunk)
                     state.hashed_bytes += len(chunk)
+                    state.transferred_bytes += len(chunk)
                     received += len(chunk)
                     _log_progress(state, offset + received, remote.size_bytes)
                 fh.flush()
@@ -240,6 +252,7 @@ def download(
             raise PermanentIngestError(f"server sent {end:,} bytes, {remote.size_bytes:,} advertised")
 
     retry_with_backoff(_attempt, description=f"GET {remote.url}", attempts=attempts, sleep=sleep)
+    transfer_seconds = time.monotonic() - started
 
     size_on_disk = part.stat().st_size
     if size_on_disk != remote.size_bytes:
@@ -259,13 +272,18 @@ def download(
         size_bytes=size_on_disk,
         sha256=digest,
         seconds=time.monotonic() - started,
+        transferred_bytes=state.transferred_bytes,
+        transfer_seconds=transfer_seconds,
         resumed_from=tuple(state.resumed_from),
         restarts=state.restarts,
     )
     logger.info(
-        "download_done bytes=%d seconds=%.1f mib_s=%.2f resumes=%d restarts=%d sha256=%s",
+        "download_done bytes=%d transferred_bytes=%d seconds=%.1f transfer_seconds=%.1f "
+        "mib_s=%.2f resumes=%d restarts=%d sha256=%s",
         result.size_bytes,
+        result.transferred_bytes,
         result.seconds,
+        result.transfer_seconds,
         result.mib_per_s,
         len(result.resumed_from),
         result.restarts,
