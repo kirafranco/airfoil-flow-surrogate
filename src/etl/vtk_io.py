@@ -3,6 +3,11 @@
 Only VTK's XML readers are used (`vtkmodules.vtkIOXML`), so nothing needs a
 display or OpenGL libraries.
 
+Each file is read into memory in one call and VTK decodes it from there. Left
+to open the file itself, VTK makes many small reads, and on a Windows folder
+bind-mounted into a Linux container each one crosses the mount: 1.2 s per mesh
+against 0.28 s this way (median of 10 meshes, identical arrays either way).
+
 VTK readers don't raise on a corrupt file. They log the problem and return an
 empty dataset with error code 0, so a truncated download would otherwise flow
 on as a mesh with no points. `_read` listens for the reader's error event and
@@ -105,7 +110,8 @@ def _read(reader: Any, path: Path) -> Any:
         errors.append(str(message).strip())
 
     reader.AddObserver(vtkCommand.ErrorEvent, on_error)
-    reader.SetFileName(str(path))
+    reader.ReadFromInputStringOn()
+    reader.SetInputString(path.read_bytes())
     reader.Update()
     output = reader.GetOutput()
     if errors or output is None or output.GetNumberOfPoints() == 0:
