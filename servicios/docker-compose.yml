@@ -35,6 +35,9 @@ services:
     restart: "no"
     environment:
       TZ: UTC
+      # cuBLAS needs a fixed workspace for bit-identical results when torch
+      # runs with deterministic algorithms: the same seed gives the same model.
+      CUBLAS_WORKSPACE_CONFIG: ":4096:8"
     volumes:
       # Code, tests and configuration read-only: a pipeline stage has no
       # business rewriting the code that defines it.
