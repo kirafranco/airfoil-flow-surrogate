@@ -78,6 +78,7 @@ class TestCompleteRun:
         etl = json.loads((_interim(roots) / "etl.json").read_text(encoding="utf-8"))
         assert etl["status"] == "complete"
         assert etl["simulations"] == {"expected": 10, "processed": 10, "skipped": 0, "failed": 0}
+        assert etl["peak_rss_mb"]["worker_max"] > 0
 
         splits = json.loads((_processed(roots) / "splits.json").read_text(encoding="utf-8"))
         assert splits["sizes"] == {"train": 7, "val": 1, "test": 2}
@@ -98,6 +99,8 @@ class TestCompleteRun:
     def test_two_worker_processes_give_the_same_tables(self, roots: dict[str, Path], tmp_path: Path) -> None:
         _snapshot(roots)
         _run(roots, workers=2)
+        etl = json.loads((_interim(roots) / "etl.json").read_text(encoding="utf-8"))
+        assert etl["peak_rss_mb"]["worker_max"] > 0  # reported by the workers themselves
         other = {**roots, "interim_root": tmp_path / "interim1", "processed_root": tmp_path / "processed1"}
         _run(other, workers=1)
         a = pq.read_table(_interim(roots) / "simulations.parquet").drop(["read_s", "total_s"])

@@ -97,6 +97,8 @@ class SimOutcome:
     bytes_written: int = 0
     read_s: float = 0.0
     total_s: float = 0.0
+    #: Peak memory of the process that handled it, so far.
+    peak_rss_mb: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -144,7 +146,12 @@ def process_simulation(sim_dir: Path, sims_root: Path) -> SimOutcome:
 
     def failed(check: str, detail: str, read_s: float = 0.0) -> SimOutcome:
         return SimOutcome(
-            name, False, ((check, detail),), read_s=read_s, total_s=time.perf_counter() - started
+            name,
+            False,
+            ((check, detail),),
+            read_s=read_s,
+            total_s=time.perf_counter() - started,
+            peak_rss_mb=_peak_rss_mb(),
         )
 
     try:
@@ -166,6 +173,7 @@ def process_simulation(sim_dir: Path, sims_root: Path) -> SimOutcome:
                 tuple((v.check, v.detail) for v in gate.violations),
                 read_s=read_s,
                 total_s=time.perf_counter() - started,
+                peak_rss_mb=_peak_rss_mb(),
             )
         derived = gate.derived
         meta = {
@@ -191,7 +199,7 @@ def process_simulation(sim_dir: Path, sims_root: Path) -> SimOutcome:
             SURFACE_FILE: surface_table(derived),
         }
         written = write_simulation(sims_root, name, tables, meta, started)
-        return SimOutcome(name, True, (), written, read_s, time.perf_counter() - started)
+        return SimOutcome(name, True, (), written, read_s, time.perf_counter() - started, _peak_rss_mb())
     except Exception as exc:  # one simulation's surprise must not stop the other 999
         return failed("error", f"{type(exc).__name__}: {exc}")
 
@@ -277,9 +285,9 @@ def _simulations_table(sims_root: Path, names: list[str], manifest: dict[str, li
 
 
 def _peak_rss_mb() -> float:
-    own = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    workers = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
-    return max(own, workers) / 1024  # ru_maxrss is in KiB on Linux
+    """Peak memory of the calling process. Each worker reports its own: with a
+    forkserver they aren't this process's children, so RUSAGE_CHILDREN misses them."""
+    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024  # ru_maxrss is in KiB on Linux
 
 
 def _timing(outcomes: Iterable[SimOutcome], wall_s: float, workers: int) -> dict[str, Any]:
@@ -344,18 +352,21 @@ def run(
     failures = tuple(o for o in outcomes if not o.ok)
     processed = len(outcomes) - len(failures)
     bytes_written = sum(o.bytes_written for o in outcomes)
+    worker_rss_mb = max((o.peak_rss_mb for o in outcomes), default=0.0)
     wall_s = time.perf_counter() - started
 
     def result(wrote_dataset: bool) -> EtlResult:
         seconds = time.perf_counter() - started
         logger.info(
-            "etl_done processed=%d skipped=%d failed=%d seconds=%.1f bytes_written=%d peak_rss_mb=%.0f wrote_dataset=%s",
+            "etl_done processed=%d skipped=%d failed=%d seconds=%.1f bytes_written=%d "
+            "peak_rss_mb_main=%.0f peak_rss_mb_worker=%.0f wrote_dataset=%s",
             processed,
             len(done),
             len(failures),
             seconds,
             bytes_written,
             _peak_rss_mb(),
+            worker_rss_mb,
             wrote_dataset,
         )
         return EtlResult(
@@ -387,7 +398,7 @@ def run(
         ],
         "timing": _timing(outcomes, wall_s, workers),
         "bytes_written": bytes_written,
-        "peak_rss_mb": round(_peak_rss_mb(), 1),
+        "peak_rss_mb": {"main": round(_peak_rss_mb(), 1), "worker_max": round(worker_rss_mb, 1)},
         "constants": {"chord_m": CHORD_M, "nu_m2_s": NU_M2_S},
     }
 
