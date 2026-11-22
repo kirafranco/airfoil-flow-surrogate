@@ -101,3 +101,24 @@ def test_the_report_puts_baselines_first_and_combines_seeds(dataset: Dataset, tm
     assert any("AirfRANS paper" in m for m in table.model)
     csv_path, md_path = write_report(models)
     assert csv_path.is_file() and md_path.read_text(encoding="utf-8").startswith("| model |")
+
+
+def test_runs_of_different_configurations_are_never_averaged_together(dataset: Dataset, tmp_path: Path) -> None:
+    models = tmp_path / "models"
+    _, free = evaluate(free_stream, dataset, dataset.names("test"))
+    configs = [(64, 60, 0.0), (64, 60, 0.0), (256, 150, 0.0), (64, 60, 1e-4)]
+    for i, (hidden, epochs, wd) in enumerate(configs):
+        run = models / f"mlp-physics-s{i}-20261123T00000{i}Z"
+        run.mkdir(parents=True)
+        metrics = {
+            "run_id": run.name,
+            "model": {"type": "mlp", "hidden": hidden, "layers": 4},
+            "targets": {"method": "physics"},
+            "training": {"epochs": epochs, "weight_decay": wd},
+            "test_metrics": free,
+        }
+        (run / "metrics.json").write_text(json.dumps(metrics), encoding="utf-8")
+    table = comparison(models).set_index("model")
+    assert table.loc["MLP 4×64, physics targets, cosine 60", "runs"] == 2
+    assert table.loc["MLP 4×256, physics targets, cosine 150", "runs"] == 1
+    assert table.loc["MLP 4×64, physics targets, cosine 60, wd 0.0001", "runs"] == 1

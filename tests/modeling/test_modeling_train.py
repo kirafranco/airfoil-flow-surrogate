@@ -74,3 +74,9 @@ def test_the_same_seed_on_the_cpu_gives_identical_weights(dataset: Dataset, tmp_
     wa = torch.load(a / "model.pt", weights_only=True)["state_dict"]
     wb = torch.load(b / "model.pt", weights_only=True)["state_dict"]
     assert all(torch.equal(wa[k], wb[k]) for k in wa)
+
+
+def test_weight_decay_trains_with_adamw_and_is_recorded(dataset: Dataset, tmp_path: Path) -> None:
+    config = TrainConfig(**{**SMALL.__dict__, "epochs": 2, "weight_decay": 1e-4})
+    run_dir = train(config, dataset, models_root=tmp_path, now=_at(3))
+    assert read_json(run_dir / "metrics.json")["training"]["weight_decay"] == 1e-4

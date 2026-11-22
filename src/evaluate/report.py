@@ -64,10 +64,19 @@ PAPER_ROWS = [
 ]
 
 
-def _label(model: dict[str, Any], targets: dict[str, Any] | None) -> str:
+def _label(model: dict[str, Any], targets: dict[str, Any] | None, training: dict[str, Any] | None = None) -> str:
+    """Runs share a label, and are averaged together, only if their configuration matches."""
     if model["type"] == "baseline":
         return {"free_stream": "Free stream (no model)", "thin_airfoil": "Thin airfoil, C_L = 2πα"}[model["name"]]
-    return f"{model['type'].upper()}, {targets['method'] if targets else '?'} targets"
+    parts = [model["type"].upper()]
+    if "layers" in model and "hidden" in model:
+        parts[0] += f" {model['layers']}×{model['hidden']}"
+    parts.append(f"{targets['method'] if targets else '?'} targets")
+    if training:
+        parts.append(f"cosine {training.get('epochs')}")
+        if training.get("weight_decay"):
+            parts.append(f"wd {training['weight_decay']:g}")
+    return ", ".join(parts)
 
 
 def collect(models_root: Path, split: str = "test") -> pd.DataFrame:
@@ -77,7 +86,8 @@ def collect(models_root: Path, split: str = "test") -> pd.DataFrame:
         metrics = json.loads(path.read_text(encoding="utf-8"))
         aggregate = metrics.get(f"{split}_metrics")
         if aggregate:
-            rows.append({"run_id": metrics["run_id"], "label": _label(metrics["model"], metrics.get("targets")), **aggregate})
+            label = _label(metrics["model"], metrics.get("targets"), metrics.get("training"))
+            rows.append({"run_id": metrics["run_id"], "label": label, **aggregate})
     return pd.DataFrame(rows)
 
 

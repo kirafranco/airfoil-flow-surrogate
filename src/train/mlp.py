@@ -57,6 +57,8 @@ class TrainConfig:
     lr_min: float = 1e-5
     volume_points: int = 32_000
     surface_weight: float = 1.0  # λ in the loss: volume MSE + λ · surface MSE
+    #: Decoupled weight decay (AdamW). 0 keeps plain Adam, so earlier runs stay reproducible.
+    weight_decay: float = 0.0
     hidden: int = 256
     layers: int = 4
     eval_batch: int = 262_144
@@ -210,7 +212,11 @@ def _train(
     )
 
     model = MLP(MlpConfig(hidden=config.hidden, layers=config.layers)).to(device)
-    optimiser = torch.optim.Adam(model.parameters(), lr=config.lr)
+    optimiser = (
+        torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
+        if config.weight_decay
+        else torch.optim.Adam(model.parameters(), lr=config.lr)
+    )
     schedule = torch.optim.lr_scheduler.CosineAnnealingLR(optimiser, T_max=config.epochs, eta_min=config.lr_min)
     generator = torch.Generator(device=device)
     generator.manual_seed(config.seed)
